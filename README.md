@@ -1,4 +1,4 @@
-# Self-healing-CICD
+# AI-ASSISTED-SELF-HEALING-CICD Self-healing-CICD
 
 Tools:
 
