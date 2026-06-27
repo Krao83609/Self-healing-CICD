@@ -1,82 +1,230 @@
-const payload = $('Github-workflow-failure').first().json.body;
-const jobs = $('Fetch logs gh workflow').first().json.jobs || [];
+// ==========================
+// GitHub Webhook Payload
+// ==========================
+const payload = $("Github-workflow-failure").first().json.body;
 
-const failedJob = jobs.find(j => j.conclusion === 'failure') || jobs[0];
-const failedSteps = failedJob?.steps?.filter(s => s.conclusion === 'failure') || [];
+// ==========================
+// Workflow Logs
+// ==========================
+const jobs = $("Fetch logs gh workflow").first().json.jobs || [];
 
-const stepDetails = failedSteps.map(s => `
-  Step: ${s.name}
-  Status: ${s.conclusion}
-  Started: ${s.started_at}
-  Completed: ${s.completed_at}
-`).join('\n');
+const failedJob =
+  jobs.find(job => job.conclusion === "failure") ||
+  jobs.find(job => job.status === "completed") ||
+  jobs[0];
 
-const commitData = $('Fetch modified files').first().json;
+const failedSteps = failedJob?.steps?.filter(
+  step => step.conclusion === "failure"
+) || [];
+
+const failedStepSummary = failedSteps.length
+  ? failedSteps.map(step => `
+Step: ${step.name}
+Status: ${step.conclusion}
+Started: ${step.started_at}
+Completed: ${step.completed_at}
+`).join("\n")
+  : "No failed step information available.";
+
+// ==========================
+// Changed Files
+// ==========================
+const commitData = $("Fetch modified files").first().json;
+
 const changedFiles = commitData.files || [];
 
-const codeExtensions = ['.js', '.ts', '.py', '.json', '.yml', '.yaml', '.sh', '.java', '.go', '.rb'];
-const relevantFiles = changedFiles.filter(f => 
-  codeExtensions.some(ext => f.filename.endsWith(ext)) && 
-  f.status !== 'removed'
+const supportedExtensions = [
+  ".js",
+  ".ts",
+  ".jsx",
+  ".tsx",
+  ".py",
+  ".json",
+  ".yml",
+  ".yaml",
+  ".sh",
+  ".java",
+  ".go",
+  ".rb",
+  ".tf",
+  ".tfvars",
+  ".dockerfile",
+  ".md"
+];
+
+const relevantFiles = changedFiles.filter(file =>
+  supportedExtensions.some(ext =>
+    file.filename.toLowerCase().endsWith(ext)
+  ) && file.status !== "removed"
 );
 
-const fileContent = $('Fetch file content').first().json;
-const actualCode = typeof fileContent === 'string' 
-  ? fileContent 
-  : (fileContent.data || fileContent.content || JSON.stringify(fileContent));
+// ==========================
+// Current File Content
+// ==========================
 
-let filesSection = '';
+const fileResponse = $("Fetch file content").first().json;
 
-if (relevantFiles.length > 0) {
-  for (const file of relevantFiles) {
-    const ext = file.filename.split('.').pop();
-    const langMap = { 
-      js: 'javascript', ts: 'typescript', py: 'python', 
-      json: 'json', yml: 'yaml', yaml: 'yaml', 
-      sh: 'bash', java: 'java', go: 'go', rb: 'ruby' 
-    };
-    const lang = langMap[ext] || ext;
+let currentFileContent = "";
 
-    filesSection += `File: ${file.filename}\nStatus: ${file.status}\n\`\`\`${lang}\n${actualCode}\n\`\`\`\n\n`;
-  }
-} else {
-  filesSection = 'No relevant code files detected in this commit.';
+if (typeof fileResponse === "string") {
+  currentFileContent = fileResponse;
+}
+else if (fileResponse.content) {
+  currentFileContent = fileResponse.content;
+}
+else if (fileResponse.data) {
+  currentFileContent = fileResponse.data;
+}
+else {
+  currentFileContent = JSON.stringify(fileResponse, null, 2);
 }
 
+// limit prompt size
+if (currentFileContent.length > 18000) {
+  currentFileContent =
+    currentFileContent.substring(0, 18000) +
+    "\n\n...FILE TRUNCATED...";
+}
+
+// ==========================
+// File Summary
+// ==========================
+
+const filesSummary =
+  relevantFiles.length > 0
+    ? relevantFiles
+        .map(file =>
+          `• ${file.filename}
+  Status: ${file.status}
+  Additions: ${file.additions}
+  Deletions: ${file.deletions}`
+        )
+        .join("\n")
+    : "No relevant source files changed.";
+
+// detect language
+const filePath = relevantFiles[0]?.filename || "unknown";
+
+const extension = filePath.split(".").pop();
+
+const languageMap = {
+  js: "javascript",
+  jsx: "javascript",
+  ts: "typescript",
+  tsx: "typescript",
+  py: "python",
+  json: "json",
+  yml: "yaml",
+  yaml: "yaml",
+  sh: "bash",
+  java: "java",
+  go: "go",
+  rb: "ruby",
+  tf: "terraform"
+};
+
+const language = languageMap[extension] || "";
+
+// ==========================
+// AI Prompt
+// ==========================
+
 const prompt = `
-CI/CD Pipeline Failure Report
-==============================
-Repository: ${payload.repo}
-Branch: ${payload.branch}
-Commit: ${payload.commit}
-Triggered by: ${payload.actor}
-Run ID: ${payload.run_id}
-Run URL: https://github.com/${payload.repo}/actions/runs/${payload.run_id}
+You are an expert Software Engineer, DevOps Engineer and Platform Engineer.
 
-Failed Job: ${failedJob?.name || 'Unknown'}
+Your task is to automatically repair a failed GitHub Actions workflow.
 
-Failed Steps:
-${stepDetails || 'Unknown'}
+------------------------------------------------
+Repository Information
+------------------------------------------------
 
-All Steps Summary:
-${failedJob?.steps?.map(s => `- ${s.name}: ${s.conclusion}`).join('\n') || 'None'}
+Repository:
+${payload.repo}
 
-Changed Files in This Commit (${relevantFiles.length} files):
-==============================
-${filesSection}
-==============================
+Branch:
+${payload.branch}
 
-IMPORTANT INSTRUCTIONS:
-- The file_path must be the REAL file that needs fixing from the list above
-- The fixed_code must PRESERVE all existing working code, only fix the bug
-- Do NOT rewrite the entire file from scratch
-- Do NOT use placeholder values
-- Return ONLY valid JSON in this format:
+Commit:
+${payload.commit}
+
+Triggered By:
+${payload.actor}
+
+Run ID:
+${payload["run-id"]}
+
+Workflow URL:
+https://github.com/${payload.repo}/actions/runs/${payload["run-id"]}
+
+------------------------------------------------
+Workflow Failure
+------------------------------------------------
+
+Failed Job
+
+${failedJob?.name || "Unknown"}
+
+Failed Steps
+
+${failedStepSummary}
+
+Workflow Summary
+
+${failedJob?.steps
+  ?.map(step => `- ${step.name} : ${step.conclusion}`)
+  .join("\n")}
+
+------------------------------------------------
+Files Changed
+------------------------------------------------
+
+${filesSummary}
+
+------------------------------------------------
+Current Source Code
+------------------------------------------------
+
+File
+
+${filePath}
+
+\`\`\`${language}
+${currentFileContent}
+\`\`\`
+
+------------------------------------------------
+Instructions
+------------------------------------------------
+
+1. Identify the real root cause.
+2. Ignore unrelated warnings.
+3. Modify ONLY the file responsible.
+4. Preserve formatting.
+5. Preserve comments.
+6. Preserve existing logic.
+7. Make the minimum change required.
+8. Return the COMPLETE corrected file.
+9. Do not truncate the code.
+10. Do not use placeholders.
+11. Do not invent dependencies.
+12. Ensure GitHub Actions succeeds.
+
+------------------------------------------------
+Output
+
+Return ONLY valid JSON.
+
 {
-  "file_path": "actual/file/path.js",
-  "fixed_code": "complete corrected code here",
-  "explanation": "brief explanation of what was fixed"
+  "branch_name": "ai-fix/<description>",
+  "file_path": "relative/path",
+  "fixed_code": "complete corrected source code",
+  "pr_title": "fix: ...",
+  "pr_body": "Root cause and solution."
 }
 `;
 
-return { prompt };
+return {
+  json: {
+    prompt
+  }
+};
