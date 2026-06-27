@@ -1,4 +1,4 @@
-name: CI Pipline for nodeJs app
+name: CI Pipline for node.Js app
 
 on:
   push:
