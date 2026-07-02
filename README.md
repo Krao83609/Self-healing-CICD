@@ -1,30 +1,8 @@
 # AI-ASSISTED-SELF-HEALING-CICD Self-healing-CICD
 
-Architecture: 
+Architecture: <img width="630" height="608" alt="image" src="https://github.com/user-attachments/assets/5b401af7-58df-4fe5-936c-819a8f852f82" />
 
-Developer Push
-        │
-        ▼
-GitHub Actions
-        │
-        ▼
-Build Failure
-        │
-        ▼
-GitHub Webhook
-        │
-        ▼
-n8n Workflow
-        │
-        ├── Fetch Workflow Logs
-        ├── Extract Error
-        ├── Send to Gemini AI
-        ├── Generate Code Fix
-        ├── Create New Branch
-        ├── Commit Changes
-        ├── Push Branch
-        ├── Create Pull Request
-        └── Notify Developer
+
 
 Tools:
 
